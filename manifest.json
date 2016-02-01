@@ -3,7 +3,7 @@
 
   "name": "Vulcun Bot",
   "description": "Auto clicker for Jackpot and automaticlly enters Lootdrops",
-  "version": "1.0",
+  "version": "1.1",
   "icons": {"128": "img/favicon.png"},
 
   "background": {
@@ -12,9 +12,9 @@
   },
 
   "content_scripts": [{
-      "matches": ["https://vulcun.com/*"],
-      "js": ["js/injector.js"],
-      "run_at": "document_end"
+      "matches": ["https://vulcun.com/user/jackpot"],
+      "js": ["js/jquery.js", "js/injector.js"],
+      "run_at": "document_idle"
   }],
 
   "browser_action": {
@@ -22,7 +22,7 @@
     "default_icon": "img/favicon.png"
   },
 
-  "content_security_policy": "script-src 'self' https://cdn.firebase.com https://*.firebaseio.com https://ajax.googleapis.com; object-src 'self'",
+  "content_security_policy": "script-src 'self' https://cdn.firebase.com https://*.firebaseio.com https://ajax.googleapis.com https://vulcun.com; object-src 'self'",
 
   "permissions": [
     "tabs",
@@ -30,6 +30,7 @@
     "*://*/*",
     "background",
     "notifications",
-    "storage"
+    "storage",
+    "cookies"
   ]
 }

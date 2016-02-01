@@ -18,52 +18,101 @@
 
 var firebase = new Firebase('https://burning-fire-6807.firebaseio.com');
 var username;
-var token;
-var league;
 var tab_id;
+var jackpotPort;
+var lootdropPort;
 
-function sendJackpotEntry(data) {
-    $.post('https://vulcun.com/api/jackpotentry', data);
+function getGamesWithChannel(callback) {
+    $.post('https://vulcun.com/api/gameswithchannel', function(t) {
+        var games = {};
+
+        $.each(t.data.games, function() {
+            $.each(this, function(name) {
+                $.each(this, function() {
+                    games[this.league_id] = {
+                        game_id: this.id,
+                        game_name: this.game_name,
+                        id: this.league_id,
+                        name: this.name,
+                        status: this.status
+                    };
+                });
+            });
+        });
+
+        callback(games);
+    }, 'json');
 }
 
 function addJackpotItem(item, callback) {
     chrome.storage.local.get('jackpotList', function(data) {
-        var items = data.jackpotList;
+        var items;
         var removed;
 
-        if (items.length == 100) {
-            var temp = items.splice(1);
-            removed  = items;
-            items    = temp;
-        }
+        if (data.jackpotList) {
+            items = data.jackpotList;
 
+            if (Object.keys(items).length == 100) {
+                var temp = items.splice(1);
+                removed     = items;
+                items    = temp;
+            }
+        } else {
+            items = [];
+        }
+  
+        //removed;
+        
         items.push(item);
         chrome.storage.local.set({
             jackpotList: items
-        }, callback);
+        });
+        callback();
     });
 }
 
 function addJackpotItemWon(item, callback) {
     chrome.storage.local.get('jackpotWon', function(data) {
-        var items = data.jackpotWon;
+        var items;
         var removed;
 
-        if (items.length == 100) {
-            var temp = items.splice(1);
-            removed  = items;
-            items    = temp;
-        }
+        if (data.jackpotWon) {
+            items = data.jackpotWon;
 
+            if (items.length == 100) {
+                var temp = items.splice(1);
+                removed  = items;
+                items    = temp;
+            }
+        } else {
+            items = [];
+        }
+  
+        //removed;
+        
         items.push(item);
         chrome.storage.local.set({
             jackpotWon: items
-        }, callback);
+        }, function() {
+          callback();
+        });
     });
 }
 
-function showNotification(title, message) {
-    chrome.notifications.create('jackpot-error', {
+function saveGamesWithChannel(items, callback) {
+    chrome.storage.local.set({
+        gamesWithChannel: items
+    }, callback);
+}
+
+function getGamesWithChannelInfo(league_id, callback) {
+    chrome.storage.local.get('gamesWithChannel', function(data) {
+        callback(data.gamesWithChannel);
+    });
+}
+
+function showNotification(type, title, message) {
+    chrome.notifications.create(type, {
         type: 'basic',
         iconUrl: 'img/favicon.png',
         title: title,
@@ -88,6 +137,13 @@ firebase.child('jackpot/jackpots').on('child_added', function(e) {
 
     addJackpotItem(jackpot, function() {
         console.log('New jackpot with price %s and name "%s"', parseFloat(jackpot.price).toLocaleString('en-US', { style: "currency", currency: "USD" }), jackpot.itemname);
+        
+        if (!jackpotPort)
+            return;
+        
+        jackpotPort.postMessage({
+            action: 'jackpot-entry'
+        });
     });
 });
 
@@ -115,12 +171,7 @@ firebase.child("jackpot/action").limitToLast(1).on("child_added", function(e) {
     if (username == winner.winnername) {
         addJackpotItemWon(winner, function() {
             console.log('You won "%s"', winner.itemname);
-            chrome.notifications.create('jackpot-congratulations', {
-                type: 'basic',
-                iconUrl: 'img/favicon.png',
-                title: 'Congratulations',
-                message: 'You won "' + winner.itemname + '"'
-            });
+            showNotification('jackpot-congratulations', 'Congratulations', 'You won "' + winner.itemname + '"');
         });
     }
     else {
@@ -128,36 +179,80 @@ firebase.child("jackpot/action").limitToLast(1).on("child_added", function(e) {
     }
 });
 
-chrome.runtime.onMessage.addListener(function(request, sender, callback) {
-    if (request.type == 'user-info' && request.username != username) {
-        showNotification('Success', 'You are logged in');
-        username = request.username;
-        token    = request.token;
-        league   = request.league;
-    }
-    else if (request.type == 'error') {
-        showNotification('Error', response.message);
-    }
-
-    if (tab_id == sender.tab.id) {
-        // User not logged
-        if (!username) {
-            showNotification('Error', 'Please log in vulcun for bot work.');
-        }
-        // User already logged in, close the tab
-        else  {
-            chrome.tabs.remove(tab_id);
-        }
-    }
-
-
-    callback({});
+// Loot vai começar
+firebase.child("endtime/").on("child_added", function(snap) {
+	  var league_id = snap.key();
+	  
+	  if (!lootdropPort)
+	      return;
+	  
+    lootdropPort.postMessage({
+        action: 'lootdrop-entry',
+        league_id: league_id
+    });
 });
 
+function checkLootdropWinners() {
+    var winnersdir = "winners/" + getFormattedDate(0);
+    firebase.child(winnersdir).orderByChild("endtime").limitToLast(1).on("child_added", function(snap) {
+        var result = snap.val();
+
+        if (!username)
+            return;
+
+        getGamesWithChannelInfo(result.league_id, function(league) {
+            $.each(result.drops, function() {
+                if (this.username == username) {
+                    showNotification('jackpot-congratulations', 'Congratulations', 'You won [' + this.drop.name + '] "' + this.drop.description + '"');
+                }
+            });
+        });
+    });
+}
+
+chrome.runtime.onConnect.addListener(function(port) {
+    if (port.name == 'jackpot' && !jackpotPort) {
+        jackpotPort = new Jackpot(port);
+    }
+});
+
+function Jackpot(port) {
+    var self = this;
+  
+    this.onUserInfo = function(name) {
+        username = name;
+        showNotification('jackpot-success', 'Success', 'You are logged in');
+    };
+    
+    this.postMessage = function(data) {
+        console.log('Jackpot.postMessage', data);
+        port.postMessage(data);
+    };
+  
+    port.onMessage.addListener(function(data) {
+        if (data.action == 'user-info' && data.username != username) {
+            self.onUserInfo(data.username);
+        }
+        else if (data.action == 'error') {
+            showNotification('jackpot-error', 'Error', response.message);
+        }
+    });
+}
+
 chrome.tabs.create({
-    url: 'https://vulcun.com/',
+    url: 'https://vulcun.com/user/jackpot',
     active: false,
     selected: false
 }, function(tab) {
-    tab_id = tab.id;
+    tab_id = tab.id.toString();
 });
+
+setInterval(function() {
+    getGamesWithChannel(function(games) {
+        saveGamesWithChannel(games, function() {
+            console.log('Game with channel updated');
+        });
+    });
+}, 60 * 60 * 1000); // 1 hour
+
+setInterval(checkLootdropWinners, 60 * 60 * 12 * 1000); // 12 hours

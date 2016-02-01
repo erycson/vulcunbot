@@ -15,29 +15,54 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+ 
+var port  = chrome.runtime.connect({name: "jackpot"});
+var query = $('header a.dropdown-toggle');
+var username;
+ 
+function isLogged() {
+    if (query.length == 1) {
+        port.postMessage({
+            action: 'error',
+            message: 'Not logged'
+        });
+        return;
+    }
+    
+    connect();
+}
+ 
+function connect() {
+    username = query.last().text();
+    
+    // send logged user info
+    port.postMessage({
+        action: 'user-info',
+        username: username
+    }, function() {
+        console.log('jackpot bot loaded');
+    });
+    
+    port.onMessage.addListener(onMessage);
+}
 
-var query = document.querySelectorAll('header a.dropdown-toggle');
+function onMessage(data) {
+    console.log('onMessage', data);
+    if (data.action == 'jackpot-entry') {
+        onJackporEntry();
+    }
+}
 
-// not logged
-if (query.length == 1) {
-    chrome.runtime.sendMessage({
-        type: 'error',
-        message: 'Not logged'
+function onJackporEntry() {
+    console.log('onJackporEntry');
+    
+    $('input[name="deposit"]').val(0);
+    $.post('https://vulcun.com/api/jackpotentry', $('#jackpot').serialize(), function() {
+        console.log('Janckpot Entry');
     });
 }
-else
-{
-    console.log('jackpot bot loaded');
-
-    var username = query.item(query.length - 1).innerText;
-    var token    = document.querySelector('input[name="_token"]').value;
-    var league   = 0; //document.querySelector('input[name="league"]').value;
-
-    // send logged user info
-    chrome.runtime.sendMessage({
-        type: 'user-info',
-        username: username,
-        token: token,
-        league: league
-    });
+ 
+var isJackpotPage = document.URL.indexOf('https://vulcun.com/user/jackpot') >= 0;
+if (isJackpotPage) {
+    isLogged();
 }
